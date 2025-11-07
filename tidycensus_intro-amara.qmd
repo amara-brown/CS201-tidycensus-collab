@@ -410,4 +410,4 @@ Over time, Honolulu County’s median household income has steadily increased, r
 
 The scatter plot shows a strong positive relationship (r ≈ +0.75) between education and income: tracts with a higher percentage of adults holding bachelor’s degrees tend to have higher household incomes. This suggests that educational attainment is a key driver of economic opportunity—communities with more access to higher education tend to be more financially stable. However, the relationship isn’t perfect; some well-educated areas still face affordability challenges due to high housing costs and limited local job diversity.
 
-Overall, the data reveal that education and income are deeply intertwined on Oʻahu, but structural and geographic inequalities still shape where wealth is concentrated across the island.
+Overall, the data reveal that education and income are deeply intertwined on Oʻahu, but structural and geographic inequalities still shape where wealth is concentrated across the island. hello
