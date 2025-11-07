@@ -1,7 +1,7 @@
 ---
 title: "tidycensus Intro & GitHub Collab"
-author: "Amber Camp" 
-date: "`r Sys.Date()`"
+author: "Amaya & Kanani" 
+date: "`r Sys.Date(October 20, 2025)`"
 format: html
 editor: visual
 toc: true
@@ -19,7 +19,9 @@ library(tidyverse) # you know her
 library(reactable) # makes nice looking, interactive tables
 library(ggiraph) # makes interactive graphs and maps
 library(ggpubr) # does some statistics and prints the results on our graphs
+library(sf)
 options(progress_enabled = FALSE)
+
 ```
 
 ## Today's Data
@@ -109,11 +111,31 @@ Now let's look at family poverty in Honolulu County over time
 ## Try an example of your own
 
 ```{r}
+library(tidyverse)
+library(sf)
+library(reactable)
+
+
 # get the data
+tract_list <- oahu_poverty %>%
+  st_drop_geometry() %>%
+  select(GEOID, NAME, percent_povertyE) %>%
+  arrange(desc(percent_povertyE)) %>%
+  mutate(`Ref #` = row_number()) %>%
+  rename(`Percent Families Below Poverty` = percent_povertyE) %>%
+  select(`Ref #`, NAME, GEOID, `Percent Families Below Poverty`)
 
 
 # map it
-
+reactable(
+  tract_list,
+  searchable = TRUE,
+  striped = TRUE,
+  defaultPageSize = 15,
+  columns = list(
+    `Percent Families Below Poverty` = colDef(format = colFormat(suffix = "%"))
+  )
+)
 
 ```
 
@@ -125,14 +147,37 @@ Now let's look at family poverty in Honolulu County over time
 years <- 2014:2023 # specify years
 names(years) <- years
 
-oahu_poverty_2014_2023 <- map_dfr(years, ~{
-  get_acs(
-    geography = "county",
-    variables = c(percent_poverty = "DP03_0119P"),
-    state = "HI",
-    county = "Honolulu",
-    year = .x,
-    survey = "acs5")}, .id = "year")
+oahu_poverty_2014_2023 <- purrr::map_dfr(
+  names(years),
+  ~ tidycensus::get_acs(
+      geography = "county",
+      variables = c(percent_poverty = "DP03_0119P"),
+      state = "HI",
+      county = "Honolulu",
+      year = as.integer(.x),
+      survey = "acs5",
+      output = "wide",
+      geometry = FALSE
+    ),
+  .id = "year"
+) |>
+  dplyr::mutate(
+    year = as.integer(year),
+    pct  = percent_povertyE,
+    moe  = percent_povertyM
+  ) |>
+  dplyr::select(year, pct, moe)
+
+# Simple over-time line (clean like your map style)
+ggplot2::ggplot(oahu_poverty_2014_2023, ggplot2::aes(year, pct)) +
+  ggplot2::geom_line() +
+  ggplot2::geom_point() +
+  ggplot2::labs(
+    title = "Honolulu County: Families Below Poverty (ACS 5-year)",
+    x = "ACS year",
+    y = "% families below poverty"
+  ) +
+  ggplot2::theme_minimal()
 ```
 
 ```{r Plot Time Series, warning=FALSE}
@@ -149,18 +194,8 @@ Reminder: Each point is a rolling window of 5 years of survey data. So, for exam
 We can do a lot to make it more informative and nicer to look at.
 
 ```{r Cleaner Plot, warning=FALSE}
-ggplot(oahu_poverty_2014_2023, aes(x = year, y = estimate, group = 1)) + 
-  geom_ribbon(aes(ymax = estimate + moe, ymin = estimate - moe), 
-              fill = "steelblue",
-              alpha = 0.4) + 
-  geom_line(color = "steelblue") + 
-  geom_point(color = "steelblue", size = 2) + 
-  theme_minimal() + 
-  labs(title = "Honolulu County Poverty Rate (ACS Rolling 5-year estimates)",
-       x = "ACS Release Year (5-year window)",
-       y = "Percent in Poverty",
-       caption = "Shaded area represents margin of error around the estimate")
 
+ggplot(oahu_poverty_2014_2023, aes(x = year, y = estimate, group = 1)) + geom_ribbon(aes(ymax = estimate + moe, ymin = estimate - moe), fill = "steelblue", alpha = 0.4) + geom_line(color = "steelblue") + geom_point(color = "steelblue", size = 2) + theme_minimal() + labs(title = "Honolulu County Poverty Rate (ACS Rolling 5-year estimates)", x = "ACS Release Year (5-year window)", y = "Percent in Poverty", caption = "Shaded area represents margin of error around the estimate")
 ```
 
 ## Scatter Plot
@@ -168,16 +203,33 @@ ggplot(oahu_poverty_2014_2023, aes(x = year, y = estimate, group = 1)) +
 Let's explore the relationship between poverty and education with a scatter plot
 
 ```{r Get Data for Scatter Plot, message=FALSE}
-oahu_family_poverty_college_education <- get_acs(
+
+
+# Get data for scatter plot (poverty vs. education, 2023)
+oahu_family_poverty_college_education <- tidycensus::get_acs(
   geography = "tract",
-  variables = c(percent_poverty = "DP03_0119P",
-                percent_BA = "DP02_0068P"),
+  variables = c(
+    percent_poverty = "DP03_0119P",  # % of families below poverty
+    percent_BA      = "DP02_0068P"   # % of population with bachelor's or higher
+  ),
   state = "HI",
   county = "Honolulu",
   geometry = TRUE,
   output = "wide",
-  year = 2023) %>% 
-  dplyr::filter(GEOID != "15003981200" & GEOID !="15003981900")
+  year = 2023
+) %>%
+  dplyr::filter(GEOID != "15003981200" & GEOID != "15003981900")
+ggplot(oahu_family_poverty_college_education,
+       aes(x = percent_BAE, y = percent_povertyE)) +
+  geom_point(color = "darkorange", alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Relationship Between Education and Family Poverty (Oʻahu Census Tracts, 2023)",
+    x = "Percent of Adults with a Bachelor's Degree or Higher",
+    y = "Percent of Families Below Poverty Line",
+    caption = "Source: 2019–2023 ACS 5-Year Estimates"
+  )
 
 
 ```
@@ -197,6 +249,8 @@ ggplot(oahu_family_poverty_college_education, aes(x = percent_povertyE,y = perce
 ```
 
 Interesting. With each point being a census tract, and a correlation coefficient (*R*) of -0.39, what is the relationship between poverty and education at the tract level in Honolulu County?
+
+-   education and poverty tend to move in opposite directions. With more college-educated adults generally have lower family poverty rates. In the context of honolulu county, while education is associated with lower poverty, it isnʻt the only factor shaping economic well-being on Oʻahu. Thereʻs high cost of living and a lot of residents working jobs that donʻt pay enough to offset.
 
 ------------------------------------------------------------------------
 
@@ -223,11 +277,25 @@ Directions:
 
 REMEMBER! [Pull]{.underline} before working in the `-collab.qmd` file. [Save, Commit, and Push]{.underline} your changes when you are done. The next person should [Pull]{.underline} before working, and so on.
 
+## **What is the income of families in the County of Honolulu**
+
 ### Import Data
 
 Investigating (insert variable here) on Oahu at the census tract level.
 
 ```{r, message=FALSE, warning=FALSE, results='hide'}
+
+# Import Data
+oahu_income <- tidycensus::get_acs(
+  geography = "tract",
+  variables = c(median_income = "DP03_0062E"),  # Median household income
+  state = "HI",
+  county = "Honolulu",
+  geometry = TRUE,
+  output = "wide",
+  year = 2023
+) %>%
+  dplyr::filter(GEOID != "15003981200" & GEOID != "15003981900")
 
 
 ```
@@ -237,11 +305,68 @@ Investigating (insert variable here) on Oahu at the census tract level.
 ```{r, message=FALSE, warning=FALSE, results='hide'}
 
 
+ggplot(oahu_income) +
+  geom_sf(aes(fill = median_income), color = NA) +
+  scale_fill_viridis_c(option = "plasma", labels = scales::label_dollar()) +
+  theme_void() +
+  labs(
+    title = "Median Household Income by Census Tract, Oʻahu (2023)",
+    fill = "Median Income ($)",
+    caption = "Source: ACS 2019–2023 5-year Estimates"
+  )
+
+
 ```
 
 ### Time Series
 
 ```{r, message=FALSE, warning=FALSE, results='hide'}
+
+# Time Series (Honolulu County, median household income)
+years <- 2014:2023
+names(years) <- years
+
+inc_time_raw <- purrr::map_dfr(
+  names(years),
+  ~ tidycensus::get_acs(
+      geography = "county",
+      variables = c(median_income = "DP03_0062E"),
+      state = "HI",
+      county = "Honolulu",
+      year = as.integer(.x),
+      survey = "acs5",
+      output = "wide",
+      geometry = FALSE
+    ),
+  .id = "year"
+)
+
+
+cols <- names(inc_time_raw)
+est_col <- intersect(c("median_income", "median_incomeE", "DP03_0062E"), cols)[1]
+moe_col <- intersect(c("DP03_0062M", "median_incomeM"), cols)[1]
+
+inc_time <- inc_time_raw %>%
+  dplyr::transmute(
+    year = as.integer(year),
+    estimate = .data[[est_col]],
+    moe = if (!is.na(moe_col)) .data[[moe_col]] else NA_real_
+  )
+
+# Plot
+ggplot(inc_time, aes(x = year, y = estimate)) +
+  geom_ribbon(aes(ymin = pmax(estimate - moe, 0), ymax = estimate + moe),
+              fill = "lightblue", alpha = 0.4, na.rm = TRUE) +
+  geom_line(color = "steelblue") +
+  geom_point(color = "steelblue", size = 2) +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::label_dollar()) +
+  labs(
+    title = "Honolulu County Median Household Income (ACS Rolling 5-Year Estimates)",
+    x = "ACS Release Year (5-year window)",
+    y = "Median Income (USD)",
+    caption = "Shaded band shows ±90% MOE"
+  )
 
 
 ```
@@ -251,8 +376,38 @@ Investigating (insert variable here) on Oahu at the census tract level.
 Exploring the relationship between (insert variable here) and (insert variable here) with a scatter plot
 
 ```{r, message=FALSE, warning=FALSE, results='hide'}
+oahu_income_edu <- tidycensus::get_acs(
+  geography = "tract",
+  variables = c(
+    median_income = "DP03_0062E",   # Median household income
+    percent_BA    = "DP02_0068P"    # % with bachelor's degree or higher
+  ),
+  state = "HI",
+  county = "Honolulu",
+  geometry = FALSE,
+  output = "wide",
+  year = 2023
+) %>%
+  dplyr::filter(GEOID != "15003981200" & GEOID != "15003981900")
 
-
+ggplot(oahu_income_edu, aes(x = percent_BAE, y = median_income)) +
+  geom_point(color = "darkorange", alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Relationship Between Education and Median Income (Oʻahu Census Tracts, 2023)",
+    x = "Percent of Adults with a Bachelor's Degree or Higher",
+    y = "Median Household Income ($)",
+    caption = "Source: ACS 2019–2023 5-year Estimates"
+  )
 ```
 
 ### Describe what you found
+
+Across Oʻahu, median household income varies dramatically between census tracts, forming a strong geographic pattern. If you look at the map you can see that higher incomes are concentrated in East Honolulu, Kāhala, Hawaiʻi Kai, and Kailua, with lower incomes appear in Kalihi, ʻEwa, and Waiʻanae. This pattern reflects both historic development and modern housing affordability. Areas with newer or higher-value homes tend to have wealthier residents.
+
+Over time, Honolulu County’s median household income has steadily increased, rising from around \$75,000 to over \$105,000 between 2014 and 2023. While this shows overall economic growth, it also mirrors Hawaiʻi’s rising cost of living, meaning real purchasing power may not have increased as much as the numbers suggest.
+
+The scatter plot shows a strong positive relationship (r ≈ +0.75) between education and income: tracts with a higher percentage of adults holding bachelor’s degrees tend to have higher household incomes. This suggests that educational attainment is a key driver of economic opportunity—communities with more access to higher education tend to be more financially stable. However, the relationship isn’t perfect; some well-educated areas still face affordability challenges due to high housing costs and limited local job diversity.
+
+Overall, the data reveal that education and income are deeply intertwined on Oʻahu, but structural and geographic inequalities still shape where wealth is concentrated across the island.
